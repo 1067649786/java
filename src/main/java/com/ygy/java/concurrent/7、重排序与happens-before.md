@@ -128,3 +128,78 @@ Java内存模型(JMM)对于正确同步多线程程序的内存一致性做了�
 不影响执行结果)
 2. 顺序一致性模型保证所有线程只能看到一致的操作执行顺序，而JMM不保证所有线程能看到一致的操作执行顺序。(因为JMM不保证所有操作立即可见)
 3. JMM不保证对64位的long型和double型变量的写操作具有原子性，而顺序一致性模型保证对所有的内存读写操作都具有原子性。
+
+## 7.3 happens-before
+
+### 7.3.1 什么是happens-before？
+
+一方面，程序员需要JVM提供一个强的内存模型来编写代码；另一方面，编译器和处理器希望JMM对它们的束缚越少越好，
+这样它们就可以最可能多的优化来提高性能，希望的是一个弱的内存模型。<br>
+
+JMM考虑了这两种需求，并且找到了平衡点，对编译器和处理器来说，**只要不改变程序的执行结果(单线程程序和正确同步了的多线程程序)，
+编译器和处理器怎么优化都行**。<br>
+
+而对于程序员，JMM提供了happens-before规则，满足了程序员的需求--**简单易懂，并且提供了足够强的内存可见性保证**。换言之，程序员
+只要遵循happens-before规则，那他写的程序就能保证在JMM中具有强的内存可见性。<br>
+
+JMM使用happens-before的概念来定制两个操作之间的执行顺序。这两个操作可以在一个线程以内，也可以是不同的线程之间。因此，
+JMM可以通过happens-before关系向程序员提供跨线程的内存可见性保证。<br>
+
+happens-before关系的定义如下：
+
+1. 如果一个操作happens-before另一个操作，那么第一个操作的执行结果将对第二个操作可见，而且第一个操作的执行顺序排在第二个操作之前。
+2. **两个操作之间存在happens-before关系，并不意味着Java平台的具体实现必须要按照happens-before关系指定的顺序来执行。
+如果重排序之后的执行结果，与按happens-before关系来执行的结果一致，那么JMM也允许这样的重排序。**
+
+<br>
+
+happens-before关系本质上和as-if-serial语义是一回事。<br>
+
+as-if-serial语义保证单线程内重排序后的执行结果和程序代码本身应有的结果是一致的，
+happens-before关系保证正确同步的多线程程序的执行结果不被重排序改变。<br>
+
+总之，如果操作A happens-before操作B，那么操作A在内存上所做的操作对操作B都是可见的，不管它们在不在一个线程。
+
+### 7.3.2 天然的happens-before关系
+
+在Java中，有以下天然的happens-before关系：
+
+- 程序顺序规则：一个线程中的每一个操作，happens-before于该线程中的任意后续操作。
+- 监视器锁规则：对一个锁的解锁，happens-before于随后对这个锁的加锁。
+- volatile变量规则：对一个volatile域的写，happens-before于任意后续对这个volatile域的读。
+- 传递性：如果A happens-before B，且B happens-before C，那么A happens-before C。
+- start规则：如果线程A执行操作ThreadB.start()启动线程B，那么A线程的ThreadB.start()操作
+happens-before于线程B中的任意操作。
+- join规则：如果线程A执行操作ThreadB.join()并成功返回，那么线程B中的任意操作happens-before于
+线程A从ThreadB.join()操作成功返回。
+
+<br>
+
+举例：
+
+```
+int a = 1; // A操作
+int b = 2; // B操作
+int sum = a + b;// C 操作
+System.out.println(sum);
+```
+
+根据以上介绍的happens-before规则，假如只有一个线程，那么不难得出：
+
+```
+1> A happens-before B 
+2> B happens-before C 
+3> A happens-before C
+```
+
+注意，真正在执行指令的时候，其实JVM有可能对操作A & B进行重排序，因为无论先执行A还是B，他们
+都对对方可见的，并且不影响执行结果。<br>
+
+如果这里发生了重排序，这在视觉上违背了happens-before原则，但是JMM是允许这样的重排序。<br>
+
+所以，我们只关心happens-before规则，不用关心JVM到底是怎样执行的。只要确定操作A happens-before操作B就行了。<br>
+
+重排序有两类，JMM对这两类重排序有不同的策略：
+
+- 会改变程序执行结果的重排序，比如A->C，JMM要求编译器和处理器都不许，禁止这种重排序。
+- 不会改变程序执行结果的从排序，比如A->B，JMM对编译器和处理器不做要求，允许这种重排序。
