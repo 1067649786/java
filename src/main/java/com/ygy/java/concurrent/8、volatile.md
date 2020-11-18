@@ -97,5 +97,102 @@ public class VolatileExample {
 
 - 在每个volatile写操作前插入一个StoreStore屏障；
 - 在每个volatile写操作后插入一个StoreLoad屏障；
-- 在每个volatile读操作后插入一个LoadLoad屏障；
+- 在每个volatile读操作前插入一个LoadLoad屏障；
 - 在每个volatile读操作后再插入一个LoadStore屏障。
+
+<br>
+
+>在逐个解释一下这几个屏障。注：下述Load代表读操作，Store代表写操作。<br>
+>
+>**LoadLoad屏障**：对于这样的语句Load1;LoadLoad;Load2，在Load2及后续读取操作要读取的数据被访问前，
+>保证Load1要读取的数据被读取完毕。<br>
+>
+>**StoreStore屏障**：对于这样的语句Store1;StoreStore;Store2，在Store2及后续写入操作执行前，
+>保证Store1的写入操作对其它处理器可见。<br>
+>
+>**LoadStore屏障**：对于这样的语句Load1;LoadStore;Store2，在store2及后续写入操作被执行前，
+>保证Load1要读取的数据被读取完毕。<br>
+>
+>**StoreLoad屏障**：对于这样的语句Store1；StoreLoad；Load2，在Load2及后续所有读取操作执行前，
+>保证Store1的写入对所有处理器可见。它的开销是四种屏障中最大的(冲刷写缓冲器，清空无效化队列)。
+>在大多数处理器的实现中，这个屏障是个万能屏障，兼具其它三种内存屏障的功能。
+
+<br>
+
+对于连续多个volatile变量读或者连续多个volatile变量写，编译器做了一定的优化来提高性能，比如：
+
+>第一个volatile读；
+>LoadLoad屏障；
+>第二个volatile读；
+>LoadStore屏障
+
+再介绍一下volatile与普通变量的重排序规则：
+
+1.如果第一个操作是volatile读，那无论第二个操作是什么，都不能重排序；
+2.如果第二个操作是volatile写，那无论第一个操作是什么，都不能重排序；
+3.如果第一个操作时volatile写，第二个操作时volatile读，那不能重排序。
+
+<br>
+
+举个例子，我们在案例中step1，是普通变量的写，step2是volatile变量的写，那符合第二个规则，这两个steps不能重排序。
+而step3是volatile变量读，step4是普通变量读，符合第一个规则，同样不能重排序。<br>
+
+但是如果下列情况：第一个操作是普通变量读，第二个操作是volatile变量读，那是可以重排序的。
+
+```java
+// 声明变量
+int a = 0; // 声明普通变量
+volatile boolean flag = false; // 声明volatile变量
+
+// 以下两个变量的读操作是可以重排序的
+int i = a; // 普通变量读
+boolean j = flag; // volatile变量读
+```
+
+## 8.3 volatile的用途
+
+从volatile的内存语义上来看，volatile可以保证内存可见性且禁止重排序。<br>
+
+在保证内存可见性这一点上，volatile有着与锁相同的内存语义，所以可以作为一个轻量级的锁来使用。
+但由于volatile仅仅保证对单个volatile变量的读/写具有原子性，而锁可以保证整个临界区代码的执行具有原子性。
+所以在功能上，锁比volatile更强大；在性能上，volatile更有优势。<br>
+
+在禁止重排序这一点上，volatile也是非常有用的。比如我们熟悉的单例模式，其中一种实现方式是双重锁检查，比如这样的代码：
+
+```java
+public class Singleton {
+
+    private static Singleton instance; // 不使用volatile关键字
+
+    // 双重锁检验
+    public static Singleton getInstance() {
+        if (instance == null) { // 第7行
+            synchronized (Singleton.class) {
+                if (instance == null) {
+                    instance = new Singleton(); // 第10行
+                }
+            }
+        }
+        return instance;
+    }
+}
+```
+
+如果这里的变量声明不使用volatile关键字，是可能会发生错误的。它可能会被重排序：
+
+```
+instance = new Singleton(); // 第10行
+
+// 可以分解为以下三个步骤
+1 memory=allocate();// 分配内存 相当于c的malloc
+2 ctorInstanc(memory) //初始化对象
+3 s=memory //设置s指向刚分配的地址
+
+// 上述三个步骤可能会被重排序为 1-3-2，也就是：
+1 memory=allocate();// 分配内存 相当于c的malloc
+3 s=memory //设置s指向刚分配的地址
+2 ctorInstanc(memory) //初始化对象
+```
+
+而一旦假设发生了这样的重排序，比如线程A在第10行执行了步骤1和步骤3，但是步骤2还没有执行完。
+这个时候线程A执行到了第7行，它会判定instance不为空，然后直接返回一个未初始化完成的instance。
